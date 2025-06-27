@@ -1,10 +1,8 @@
-// QuickReadWizard.jsx
 import React, { useState, useEffect } from 'react';
 import { apiService } from './services/apiService';
 import DocumentInput from './components/DocumentInput';
 import Summary from './components/Summary';
 import AskQuestions from './components/AskQuestions';
-
 import ErrorMessage from './components/ErrorMessage';
 
 const App = () => {
@@ -13,9 +11,9 @@ const App = () => {
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isAskingQuestion, setIsAskingQuestion] = useState(false);
+  const [isRemovingFile, setIsRemovingFile] = useState(false);
   const [error, setError] = useState('');
 
-  // Load initial status
   useEffect(() => {
     const loadStatus = async () => {
       try {
@@ -105,12 +103,16 @@ const App = () => {
   };
 
   const handleRemoveFile = async () => {
+    setIsRemovingFile(true);
+    setError('');
     try {
       await apiService.removeFile();
       setFileInfo(null);
       setSummary('');
     } catch (error) {
       setError(error.message);
+    } finally {
+      setIsRemovingFile(false);
     }
   };
 
@@ -119,8 +121,8 @@ const App = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header Section - Fixed height with proper spacing */}
+    <div className="min-h-screen bg-gray-100">
+      {/* Header Section */}
       <div className="px-3 sm:px-4 lg:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4">
         <div className="text-center max-w-4xl mx-auto">
           <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 mb-1 sm:mb-2">
@@ -144,18 +146,19 @@ const App = () => {
           {/* Mobile Layout - Stacked Vertically with natural scrolling */}
           <div className="lg:hidden space-y-4">
             {/* Mobile: Document Input */}
-            <div className="min-h-[200px]">
+            <div className="min-h-[200px] w-full">
               <DocumentInput
                 onFileUploaded={handleFileUpload}
                 onUrlAnalyzed={handleUrlAnalysis}
                 fileInfo={fileInfo}
                 onRemoveFile={handleRemoveFile}
                 isLoading={isUploadingFile}
+                isRemovingFile={isRemovingFile}
               />
             </div>
             
             {/* Mobile: Summary */}
-            <div className="min-h-[300px]">
+            <div className="min-h-[300px] w-full">
               <Summary
                 fileInfo={fileInfo}
                 summary={summary}
@@ -168,7 +171,7 @@ const App = () => {
             </div>
             
             {/* Mobile: Ask Questions */}
-            <div className="min-h-[200px]">
+            <div className="min-h-[200px] w-full">
               <AskQuestions
                 fileInfo={fileInfo}
                 onAskQuestion={handleAskQuestion}
@@ -180,22 +183,23 @@ const App = () => {
 
           {/* Desktop Layout - Two Columns with fixed viewport height */}
           <div className="hidden lg:grid lg:grid-cols-2 gap-6 h-[calc(100vh-12rem)]">
-            {/* Left Column - Independent scrolling container */}
+            {/* Left Column - Independent scrolling container with horizontal overflow disabled */}
             <div className="h-full overflow-hidden">
-              <div className="h-full flex flex-col gap-6 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-500">
+              <div className="h-full flex flex-col gap-6 overflow-y-auto overflow-x-hidden pr-2 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-500">
                 {/* Document Input - Flexible height */}
-                <div className="flex-shrink-0">
+                <div className="flex-shrink-0 w-full overflow-hidden">
                   <DocumentInput
                     onFileUploaded={handleFileUpload}
                     onUrlAnalyzed={handleUrlAnalysis}
                     fileInfo={fileInfo}
                     onRemoveFile={handleRemoveFile}
                     isLoading={isUploadingFile}
+                    isRemovingFile={isRemovingFile}
                   />
                 </div>
                 
                 {/* Ask Questions - Flexible height */}
-                <div className="flex-shrink-0">
+                <div className="flex-shrink-0 w-full overflow-hidden">
                   <AskQuestions
                     fileInfo={fileInfo}
                     onAskQuestion={handleAskQuestion}
@@ -208,7 +212,7 @@ const App = () => {
 
             {/* Right Column - Independent scrolling container */}
             <div className="h-full overflow-hidden">
-              <div className="h-full">
+              <div className="h-full w-full">
                 <Summary
                   fileInfo={fileInfo}
                   summary={summary}

@@ -139,7 +139,7 @@ const Summary = ({ fileInfo, summary, onSummarize, onDownload, onClear, isSummar
     ),
     
     // Code blocks with background
-    code: ({ inline, children, className }) => {
+    code: ({ inline, children }) => {
       if (inline) {
         return (
           <code className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-xs font-mono">

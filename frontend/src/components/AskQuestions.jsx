@@ -17,6 +17,12 @@ const AskQuestions = ({ fileInfo, onAskQuestion, isLoading }) => {
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
   const [questionsGenerated, setQuestionsGenerated] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
+  const defaultQuestions=[
+    "What are the main points of this document?",
+    "Can you explain the key findings?",
+    "What are the conclusions?",
+    "Are there any recommendations mentioned?",
+  ]
   // Clear question and answer when fileInfo changes (document removed/changed)
   useEffect(() => {
     if (!fileInfo) {
@@ -26,7 +32,6 @@ const AskQuestions = ({ fileInfo, onAskQuestion, isLoading }) => {
       setSuggestedQuestions([]);
       setQuestionsGenerated(false);
     } else if (fileInfo && !questionsGenerated) {
-      // Auto-generate questions when a new file is uploaded
       generateSuggestedQuestions();
     }
   }, [fileInfo]);
@@ -47,23 +52,13 @@ const AskQuestions = ({ fileInfo, onAskQuestion, isLoading }) => {
           data.error || "Unknown error"
         );
         // Fallback to default questions
-        setSuggestedQuestions([
-          "What are the main points of this document?",
-          "Can you explain the key findings?",
-          "What are the conclusions?",
-          "Are there any recommendations mentioned?",
-        ]);
+        setSuggestedQuestions(defaultQuestions);
         setQuestionsGenerated(true);
       }
     } catch (error) {
       console.error("Error generating questions:", error);
       // Fallback to default questions
-      setSuggestedQuestions([
-        "What are the main points of this document?",
-        "Can you explain the key findings?",
-        "What are the conclusions?",
-        "Are there any recommendations mentioned?",
-      ]);
+      setSuggestedQuestions(defaultQuestions);
       setQuestionsGenerated(true);
     } finally {
       setIsLoadingQuestions(false);

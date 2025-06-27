@@ -1,5 +1,4 @@
-
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = "http://localhost:5000"; // or 127.0.0.1
 console.log(API_BASE_URL)
 
 export const apiService = {
@@ -25,7 +24,7 @@ export const apiService = {
     const formData = new FormData();
     formData.append('file', file);
     
-    const response = await fetch(`${API_BASE_URL}/api/upload`, {  // Fixed: Added /api prefix
+    const response = await fetch(`${API_BASE_URL}/api/upload`, {  
       method: 'POST',
       credentials: 'include',
       body: formData,
@@ -76,7 +75,7 @@ export const apiService = {
   },
 
   async downloadSummary() {
-    const response = await fetch(`${API_BASE_URL}/api/download-summary`, {  // Fixed: Added /api prefix
+    const response = await fetch(`${API_BASE_URL}/api/download-summary`, {  
       method: 'POST',
       credentials: 'include',
     });

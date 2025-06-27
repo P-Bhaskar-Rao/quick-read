@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger("Crawler")
 
 def chunk_text(text):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=250)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=20)
     return splitter.split_text(text)
 
 class WebCrawler:

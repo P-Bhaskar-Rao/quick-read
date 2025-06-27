@@ -1,9 +1,9 @@
 // components/DocumentInput.jsx
 import React, { useState } from 'react';
-import { Upload, Link, FileText, X, File, Loader2 } from 'lucide-react';
+import { Upload, Link, FileText, Loader2 } from 'lucide-react';
 import FileStatus from './FileStatus';
 
-const DocumentInput = ({ onFileUploaded, onUrlAnalyzed, fileInfo, onRemoveFile, isLoading }) => {
+const DocumentInput = ({ onFileUploaded, onUrlAnalyzed, fileInfo, onRemoveFile,isRemovingFile, isLoading }) => {
   const [activeTab, setActiveTab] = useState('upload');
   const [dragOver, setDragOver] = useState(false);
   const [url, setUrl] = useState('');
@@ -51,46 +51,17 @@ const DocumentInput = ({ onFileUploaded, onUrlAnalyzed, fileInfo, onRemoveFile, 
     }
   };
 
-
-
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <div className="flex items-center gap-2 mb-4">
-        <FileText className="w-5 h-5 text-blue-600" />
+        <FileText className="w-6 h-6 text-blue-600" />
         <h2 className="text-lg font-semibold text-gray-800">Document Input</h2>
       </div>
       <p className="text-sm text-gray-600 mb-4">Upload a PDF file or provide a URL to analyze</p>
       
       {/* File Status Display */}
-      <FileStatus fileInfo={fileInfo} onRemove={onRemoveFile}/>
-      {/* {fileInfo && (
-        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <File className="w-4 h-4 text-green-600" />
-              <div>
-                <p className="text-sm font-medium text-green-800">
-                  {fileInfo.file_name || fileInfo.url || 'Document loaded'}
-                </p>
-                {fileInfo.file_size && !isNaN(fileInfo.file_size) && (
-                  <p className="text-xs text-green-600">
-                    {(fileInfo.file_size)} MB
-                  </p>
-                )}
-              </div>
-            </div>
-            <button
-              onClick={onRemoveFile}
-              className="p-1 text-green-600 hover:text-green-800 transition-colors"
-              title="Remove file"
-              disabled={isLoading}
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )} */}
-      
+      <FileStatus fileInfo={fileInfo} onRemove={onRemoveFile} isRemoving={isRemovingFile}/>
+    
       {/* Only show upload/URL interface when no file is loaded */}
       {!fileInfo && (
         <div className="relative">
@@ -104,7 +75,7 @@ const DocumentInput = ({ onFileUploaded, onUrlAnalyzed, fileInfo, onRemoveFile, 
               }`}
               disabled={isLoading}
             >
-              <Upload className="w-4 h-4 inline mr-2" />
+              <Upload className="w-5 h-5 inline mr-2" />
               Upload PDF
             </button>
             <button
@@ -116,7 +87,7 @@ const DocumentInput = ({ onFileUploaded, onUrlAnalyzed, fileInfo, onRemoveFile, 
               }`}
               disabled={isLoading}
             >
-              <Link className="w-4 h-4 inline mr-2" />
+              <Link className="w-5 h-5 inline mr-2" />
               From URL
             </button>
           </div>
@@ -153,7 +124,7 @@ const DocumentInput = ({ onFileUploaded, onUrlAnalyzed, fileInfo, onRemoveFile, 
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-5 h-5 animate-spin" />
                     Extracting PDF...
                   </>
                 ) : (
@@ -165,19 +136,21 @@ const DocumentInput = ({ onFileUploaded, onUrlAnalyzed, fileInfo, onRemoveFile, 
 
           {activeTab === 'url' && (
             <div className="space-y-4">
-              <input
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="Enter URL to analyze..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={isLoading}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' && url.trim() && !isLoading) {
-                    handleUrlSubmit();
-                  }
-                }}
-              />
+              <div className="w-full">
+                <input
+                  type="url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="Enter URL to analyze..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  disabled={isLoading}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' && url.trim() && !isLoading) {
+                      handleUrlSubmit();
+                    }
+                  }}
+                />
+              </div>
               <button
                 onClick={handleUrlSubmit}
                 disabled={!url.trim() || isLoading}
@@ -185,12 +158,12 @@ const DocumentInput = ({ onFileUploaded, onUrlAnalyzed, fileInfo, onRemoveFile, 
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-5 h-5 animate-spin" />
                     Analyzing URL...
                   </>
                 ) : (
                   <>
-                    <Link className="w-4 h-4" />
+                    <Link className="w-5 h-5" />
                     Analyze URL
                   </>
                 )}
