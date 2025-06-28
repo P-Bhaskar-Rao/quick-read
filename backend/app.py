@@ -5,6 +5,8 @@ from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 import os, uuid
 import logging
+from redis import Redis
+from datetime import timedelta
 
 from utils.pdf_utils import generate_enhanced_pdf
 from summarizer import summarize_chunks
@@ -12,52 +14,51 @@ from crawler import crawl_site
 from logger import setup_logger
 from langchain_google_vertexai import ChatVertexAI
 from langchain_core.prompts import ChatPromptTemplate
-from prompt import *
 
-# New Google Cloud imports
 from config import AppConfig
 from database_manager import DatabaseManager
 from cloud_storage_pdf_loader import CloudStoragePDFLoader
 from embed_pdf_to_cloudsql import (
     process_pdf_content,
-    process_url_content,  # ✅ NEW: Import URL processing
+    process_url_content,
     search_similar_content,
     delete_file_embeddings,
     create_tables_if_not_exists,
 )
-from decorators import retry_on_rate_limit
+from decorators import (
+    retry_on_rate_limit,
+    require_file_upload,
+    handle_exceptions,
+    validate_request_data,
+)
 from embedding import vertex_ai_embeddings_instance
-from decorators import require_file_upload, handle_exceptions, validate_request_data
 from utils.response_helpers import (
     validate_file_info,
     handle_api_error,
     get_content_for_processing,
 )
 from constants import *
+from prompt import *
 from google.cloud import storage
 
 load_dotenv()
 logger = setup_logger("App")
 
-# Initialize configuration
+# === Configuration and Initialization ===
+
 config = AppConfig()
 config.validate_config()
 
-# Initialize database manager
 db_manager = DatabaseManager(config)
-
-# Initialize Google Cloud Storage client and PDF loader
 storage_client = storage.Client(project=config.project_id)
 pdf_loader = CloudStoragePDFLoader(storage_client, config.pdf_bucket_name)
 
-# Initialize LLM once globally with Vertex AI
 llm = ChatVertexAI(
     model_name="gemini-1.5-flash",
     project=os.getenv("GOOGLE_CLOUD_PROJECT"),
     location=os.getenv("GOOGLE_CLOUD_REGION"),
 )
 
-# Create database tables if they don't exist
 try:
     create_tables_if_not_exists(db_manager)
     logger.info("Database tables initialized successfully")
@@ -67,21 +68,47 @@ except Exception as e:
 
 app = Flask(__name__)
 app.secret_key = config.app_secret_key
-app.config["SESSION_TYPE"] = "filesystem"
-# ✅ CHANGED: Remove secure cookie settings for Cloud Run
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = False  # Set to True only if using HTTPS
+
+# === Redis Session Configuration ===
+
+try:
+    redis_client = Redis(
+        host=os.getenv("REDIS_HOST", "localhost"),
+        port=int(os.getenv("REDIS_PORT", 6379)),
+        decode_responses=False,
+        socket_timeout=5,
+        socket_connect_timeout=5,
+        health_check_interval=30,
+    )
+    redis_client.ping()
+    app.config["SESSION_TYPE"] = "redis"
+    app.config["SESSION_REDIS"] = redis_client
+    logger.info("Redis connection successful")
+except Exception as e:
+    logger.error(f"Redis connection failed: {e}")
+    app.config["SESSION_TYPE"] = "filesystem"
+    app.config["SESSION_FILE_DIR"] = "/tmp/flask_session"
+    os.makedirs("/tmp/flask_session", exist_ok=True)
+    logger.warning("Falling back to filesystem sessions")
+
+app.config.update(
+    SESSION_COOKIE_SECURE=True,  # Keep True for HTTPS deployment
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='None',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=24),
+)
+
 Session(app)
 
-# ✅ CHANGED: Updated CORS for Cloud Run deployment
+# === CORS Configuration ===
+
 CORS(
     app,
     origins=[
-        "http://localhost:5173", 
+        "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://storage.googleapis.com/quick-read-wizard",
-        # Add your actual frontend domain here when deployed
-        # "https://your-frontend-domain.com"
+        "https://storage.googleapis.com",
+        "https://quick-read-wizard.storage.googleapis.com",
     ],
     supports_credentials=True,
     allow_headers=["Content-Type", "Authorization", "Accept"],
@@ -89,11 +116,13 @@ CORS(
     expose_headers=["Content-Disposition"],
 )
 
-# ✅ NEW: Health check endpoint for Cloud Run
+
+# Health check endpoint for Cloud Run
 @app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint for Cloud Run"""
     return jsonify({"status": "healthy", "service": "quick-read-wizard"}), 200
+
 
 @app.route("/api/status", methods=["GET"])
 def get_status():
@@ -105,6 +134,7 @@ def get_status():
             "answer": session.get("answer"),
         }
     )
+
 
 @app.route("/api/upload", methods=["POST"])
 @handle_exceptions("Upload")
@@ -144,7 +174,14 @@ def api_upload():
 
         db_manager.execute_query(
             insert_doc_query,
-            (unique_filename, filename, len(file_bytes), unique_filename, public_url, "pdf"),
+            (
+                unique_filename,
+                filename,
+                len(file_bytes),
+                unique_filename,
+                public_url,
+                "pdf",
+            ),
         )
 
         # ✅ CORRECT: Process PDF and store both chunks AND embeddings
@@ -168,17 +205,21 @@ def api_upload():
                 blob = bucket.blob(unique_filename)
                 if blob.exists():
                     blob.delete()
-                    logger.info(f"Deleted blob {unique_filename} due to failed embedding")
+                    logger.info(
+                        f"Deleted blob {unique_filename} due to failed embedding"
+                    )
             except Exception as cleanup_err:
                 logger.warning(f"Cleanup after failed embedding failed: {cleanup_err}")
 
             return (
-                jsonify({
-                    "error": (
-                        "This PDF could not be processed — it appears to be image-based or non-copyable. "
-                        "We're working on adding OCR support soon. Try uploading another PDF with selectable text."
-                    )
-                }),
+                jsonify(
+                    {
+                        "error": (
+                            "This PDF could not be processed — it appears to be image-based or non-copyable. "
+                            "We're working on adding OCR support soon. Try uploading another PDF with selectable text."
+                        )
+                    }
+                ),
                 400,
             )
 
@@ -197,15 +238,18 @@ def api_upload():
         session.pop("answer", None)
         session.pop("suggested_questions", None)
 
-        return jsonify({
-            "success": True,
-            "file_info": file_info,
-            "message": "File uploaded successfully",
-        })
+        return jsonify(
+            {
+                "success": True,
+                "file_info": file_info,
+                "message": "File uploaded successfully",
+            }
+        )
 
     except Exception as e:
         logger.error(f"Upload error: {e}")
         return jsonify({"error": f"Upload failed: {str(e)}"}), 500
+
 
 @app.route("/api/analyze-url", methods=["POST"])
 @validate_request_data(["url"])
@@ -222,7 +266,7 @@ def api_analyze_url():
         result = crawl_site(url)
 
         if isinstance(result, tuple):
-            result, _ = result 
+            result, _ = result
 
         content = result.get("text", "")
         if not content or not content.strip():
@@ -239,7 +283,7 @@ def api_analyze_url():
             url=url,
             content=content,
             db_manager=db_manager,
-            title=title
+            title=title,
         )
 
         if not embed_success:
@@ -250,7 +294,7 @@ def api_analyze_url():
         file_info = {
             "file_name": title,
             "file_size": "From URL",
-            "file_id": url_file_id,  
+            "file_id": url_file_id,
             "content_type": "url",
             "original_url": url,
         }
@@ -261,19 +305,23 @@ def api_analyze_url():
         session.pop("answer", None)
         session.pop("suggested_questions", None)
 
-        return jsonify({
-            "success": True,
-            "file_info": file_info,
-            "message": "URL analyzed successfully",
-        })
+        return jsonify(
+            {
+                "success": True,
+                "file_info": file_info,
+                "message": "URL analyzed successfully",
+            }
+        )
 
     except Exception as e:
         logger.error(f"URL analysis error: {e}")
         return jsonify({"error": f"URL analysis failed: {str(e)}"}), 500
 
+
 @retry_on_rate_limit(max_retries=3)
 def safe_llm_invoke(messages):
     return llm.invoke(messages)
+
 
 @app.route("/api/summarize", methods=["POST"])
 @require_file_upload
@@ -302,6 +350,7 @@ def api_summarize():
         else:
             # ✅ UNIFIED: Use same summarizer for both content types
             from summarizer import summarize_pdf_content_from_chunks
+
             summary = summarize_pdf_content_from_chunks(chunks_data)
 
         print("summary:\n", summary)
@@ -315,6 +364,7 @@ def api_summarize():
         error_msg = f"Error generating summary: {str(e)}"
         session["summary"] = error_msg
         return jsonify({"error": error_msg}), 500
+
 
 @app.route("/api/ask", methods=["POST"])
 @require_file_upload
@@ -362,11 +412,13 @@ def api_ask():
         session["answer"] = error_msg
         return jsonify({"error": error_msg}), 500
 
+
 @app.route("/api/clear-summary", methods=["POST"])
 def api_clear_summary():
     """Clear summary"""
     session.pop("summary", None)
     return jsonify({"success": True})
+
 
 @app.route("/api/remove", methods=["POST"])
 @handle_exceptions("File Removal")
@@ -380,7 +432,7 @@ def api_remove():
     if file_info:
         file_id = file_info.get("file_id")
         content_type = file_info.get("content_type")
-        
+
         if file_id:
             try:
                 # ✅ UNIFIED: Delete embeddings and chunks for both PDF and URL
@@ -410,6 +462,7 @@ def api_remove():
 
     return jsonify({"success": True})
 
+
 @app.route("/api/download-summary", methods=["POST"])
 @handle_exceptions("PDF Generation")
 def api_download_summary():
@@ -421,7 +474,9 @@ def api_download_summary():
         return jsonify({"error": "No summary available"}), 400
 
     try:
-        filename = f"summary_{file_info.get('file_name', 'document').replace('/', '_')}.pdf"
+        filename = (
+            f"summary_{file_info.get('file_name', 'document').replace('/', '_')}.pdf"
+        )
 
         buffer = generate_enhanced_pdf(
             summary, title=f"Summary: {file_info.get('file_name', 'Document')}"
@@ -435,6 +490,7 @@ def api_download_summary():
     except Exception as e:
         logger.error(f"PDF generation error: {e}")
         return jsonify({"error": f"PDF generation failed: {str(e)}"}), 500
+
 
 @app.route("/api/suggested-questions", methods=["POST"])
 @require_file_upload
@@ -461,7 +517,7 @@ def api_suggested_questions():
             limit=20,
             db_manager=db_manager,
         )
-        
+
         context = (
             "\n\n".join([doc["content"] for doc in relevant_docs[:10]])
             if relevant_docs
@@ -491,9 +547,17 @@ def api_suggested_questions():
         session["suggested_questions"] = DEFAULT_QUESTIONS[:3]
         return jsonify({"success": True, "questions": DEFAULT_QUESTIONS[:3]})
 
-# ✅ CHANGED: Cloud Run compatible main block
+
+@app.route("/api/debug-session")
+def debug_session():
+    return jsonify({
+        "file_info": session.get("file_info"),
+        "summary": session.get("summary"),
+        "keys": list(session.keys())
+    })
+
 if __name__ == "__main__":
-    # Cloud Run provides PORT environment variable
+
     PORT = int(os.getenv("PORT", 8080))
-    # ✅ CRITICAL: Bind to 0.0.0.0 for Cloud Run, not 127.0.0.1
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+
+    app.run(host="0.0.0.0", port=int(PORT), debug=False)

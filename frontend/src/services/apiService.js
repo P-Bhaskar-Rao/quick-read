@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://localhost:5000"; // or 127.0.0.1
+const API_BASE_URL =import.meta.env.VITE_API_URL || "http://localhost:5000";
 console.log(API_BASE_URL)
 
 export const apiService = {
@@ -63,6 +63,7 @@ export const apiService = {
       method: 'POST',
     });
   },
+  
 
   async getStatus() {
     return this.request('/status');
@@ -85,5 +86,9 @@ export const apiService = {
     }
     
     return response.blob();
+  },
+
+  async debugSession() {
+    return this.request('/debug-session');
   }
 };

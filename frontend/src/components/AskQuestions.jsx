@@ -1,5 +1,5 @@
 // components/AskQuestions.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   MessageCircle,
   AlertCircle,
@@ -17,78 +17,163 @@ const AskQuestions = ({ fileInfo, onAskQuestion, isLoading }) => {
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
   const [questionsGenerated, setQuestionsGenerated] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
-  const defaultQuestions=[
+
+  
+  // 🔧 FIXED: Move defaultQuestions to useMemo to prevent recreation
+  const defaultQuestions = useMemo(() => [
     "What are the main points of this document?",
     "Can you explain the key findings?",
     "What are the conclusions?",
     "Are there any recommendations mentioned?",
-  ]
-  // Clear question and answer when fileInfo changes (document removed/changed)
-  useEffect(() => {
-    if (!fileInfo) {
-      setQuestion("");
-      setAnswer("");
-      setIsAsking(false);
-      setSuggestedQuestions([]);
-      setQuestionsGenerated(false);
-    } else if (fileInfo && !questionsGenerated) {
-      generateSuggestedQuestions();
-    }
-  }, [fileInfo]);
+  ], []);
 
-  const generateSuggestedQuestions = async () => {
+  // 🔧 FIXED: Removed defaultQuestions from dependency array
+  const generateSuggestedQuestions = useCallback(async (retryAttempt = 0) => {
     if (!fileInfo || isLoadingQuestions) return;
+
+    // Add small delay to ensure session is established
+    if (retryAttempt === 0) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
     setIsLoadingQuestions(true);
     try {
+      console.log('Generating questions, attempt:', retryAttempt + 1);
       const data = await apiService.getSuggestedQuestions();
 
       if (data.success) {
         setSuggestedQuestions(data.questions || []);
         setQuestionsGenerated(true);
       } else {
-        console.error(
-          "Failed to generate questions:",
-          data.error || "Unknown error"
-        );
+        console.error("Failed to generate questions:", data.error || "Unknown error");
+        
+        // Retry logic for session issues
+        if ((data.error === "No file uploaded" || data.error?.includes("No file uploaded")) && retryAttempt < 2) {
+          console.log('Retrying question generation due to session issue...');
+          setTimeout(() => {
+            generateSuggestedQuestions(retryAttempt + 1);
+          }, 2000 * (retryAttempt + 1)); // Exponential backoff
+          return;
+        }
+        
         // Fallback to default questions
         setSuggestedQuestions(defaultQuestions);
         setQuestionsGenerated(true);
       }
     } catch (error) {
       console.error("Error generating questions:", error);
+      
+      // Retry on network errors
+      if (error.message?.includes("No file uploaded") && retryAttempt < 2) {
+        console.log('Retrying question generation due to error...');
+        setTimeout(() => {
+          generateSuggestedQuestions(retryAttempt + 1);
+        }, 2000 * (retryAttempt + 1));
+        return;
+      }
+      
       // Fallback to default questions
       setSuggestedQuestions(defaultQuestions);
       setQuestionsGenerated(true);
     } finally {
       setIsLoadingQuestions(false);
     }
-  };
+  }, [fileInfo, isLoadingQuestions, defaultQuestions]);
 
-  const handleSubmit = async () => {
-    if (!question.trim() || !fileInfo) return;
+  // 🔧 FIXED: Better useEffect with proper cleanup and dependency management
+  useEffect(() => {
+    let timeoutId;
+    
+    if (!fileInfo) {
+      setQuestion("");
+      setAnswer("");
+      setIsAsking(false);
+      setSuggestedQuestions([]);
+      setQuestionsGenerated(false);
+    } else if (fileInfo && !questionsGenerated && !isLoadingQuestions) {
+      // Add delay before generating questions
+      timeoutId = setTimeout(() => {
+        generateSuggestedQuestions();
+      }, 500);
+    }
+    
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [fileInfo, questionsGenerated, isLoadingQuestions]); // 🔧 FIXED: Removed generateSuggestedQuestions from deps
+
+  // 🔧 FIXED: Add proper error handling and validation
+  const handleSubmit = async (retryAttempt = 0) => {
+    if (!question.trim() || !fileInfo || isAsking) return;
 
     setIsAsking(true);
     try {
+      // 🔧 FIXED: Add validation for onAskQuestion
+      if (!onAskQuestion || typeof onAskQuestion !== 'function') {
+        throw new Error('Question handler not available');
+      }
+      
       const response = await onAskQuestion(question);
-      setAnswer(response.answer);
+      
+      // 🔧 FIXED: Add response validation
+      if (response && response.answer) {
+        setAnswer(response.answer);
+      } else {
+        setAnswer('No answer received');
+      }
     } catch (error) {
-      setAnswer(`Error: ${error.message}`);
+      console.error("Error asking question:", error);
+      
+      // Retry logic for session issues
+      if (error.message?.includes("No file uploaded") && retryAttempt < 1) {
+        console.log('Retrying question submission...');
+        setTimeout(() => {
+          handleSubmit(retryAttempt + 1);
+        }, 1000);
+        return;
+      }
+      
+      setAnswer(`Error: ${error.message || 'Failed to get answer'}`);
     } finally {
       setIsAsking(false);
     }
   };
 
-  const handleSuggestedQuestion = async (suggestedQ) => {
+  const handleSuggestedQuestion = async (suggestedQ, retryAttempt = 0) => {
+    if (!suggestedQ || !fileInfo) return;
+    
     setQuestion(suggestedQ);
-    if (!fileInfo) return;
-
     setIsAsking(true);
+    
     try {
+      // 🔧 FIXED: Add validation for onAskQuestion
+      if (!onAskQuestion || typeof onAskQuestion !== 'function') {
+        throw new Error('Question handler not available');
+      }
+      
       const response = await onAskQuestion(suggestedQ);
-      setAnswer(response.answer);
+      
+      // 🔧 FIXED: Add response validation
+      if (response && response.answer) {
+        setAnswer(response.answer);
+      } else {
+        setAnswer('No answer received');
+      }
     } catch (error) {
-      setAnswer(`Error: ${error.message}`);
+      console.error("Error with suggested question:", error);
+      
+      // Retry logic for session issues
+      if (error.message?.includes("No file uploaded") && retryAttempt < 1) {
+        console.log('Retrying suggested question...');
+        setTimeout(() => {
+          handleSuggestedQuestion(suggestedQ, retryAttempt + 1);
+        }, 1000);
+        return;
+      }
+      
+      setAnswer(`Error: ${error.message || 'Failed to get answer'}`);
     } finally {
       setIsAsking(false);
     }
@@ -99,11 +184,12 @@ const AskQuestions = ({ fileInfo, onAskQuestion, isLoading }) => {
   };
 
   const refreshQuestions = () => {
+    if (isLoadingQuestions) return; // 🔧 FIXED: Prevent multiple refreshes
+    
     setIsRotating(true);
     setQuestionsGenerated(false);
     setSuggestedQuestions([]);
     generateSuggestedQuestions();
-    // Reset rotation after animation
     setTimeout(() => setIsRotating(false), 500);
   };
 
@@ -166,7 +252,7 @@ const AskQuestions = ({ fileInfo, onAskQuestion, isLoading }) => {
         )}
 
         <button
-          onClick={handleSubmit}
+          onClick={() => handleSubmit()}
           disabled={!question.trim() || !fileInfo || isAsking || isLoading}
           className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:cursor-pointer"
         >
@@ -195,7 +281,6 @@ const AskQuestions = ({ fileInfo, onAskQuestion, isLoading }) => {
                 AI-Suggested Questions
               </h3>
             </div>
-            {/* Always show refresh button when fileInfo exists */}
             <button
               onClick={refreshQuestions}
               disabled={isLoadingQuestions}
@@ -237,7 +322,7 @@ const AskQuestions = ({ fileInfo, onAskQuestion, isLoading }) => {
               ))}
               {suggestedQuestions.length === 0 && questionsGenerated && (
                 <p className="text-sm text-gray-500 italic">
-                  No suggested questions available.
+                  No suggested questions available. Try refreshing.
                 </p>
               )}
             </div>
